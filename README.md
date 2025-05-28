@@ -1,0 +1,1 @@
+PTP time synchronization over 5G network
