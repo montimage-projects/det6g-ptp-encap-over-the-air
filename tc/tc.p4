@@ -307,6 +307,8 @@ parser MyParser(packet_in packet,
         transition select(hdr.udp.dstPort) {
            PTP_PORT_319 : parse_ptp;
            PTP_PORT_320 : parse_ptp;
+           //encapsulated
+           12345 : parse_ptp;
            default      : accept;
         }
     }
@@ -368,80 +370,33 @@ control MyVerifyChecksum(inout headers hdr, inout metadata meta) {
 
 control MyIngress(inout headers hdr,
                   inout metadata meta,
-                  inout standard_metadata_t standard_metadata) {
+                  inout standard_metadata_t std_data) {
 
-    /* default table and its actions for packet forwarding */
-    action drop() {
-        mark_to_drop(standard_metadata);
-    }
-    action ipv4_forward(macAddr_t dstAddr, egressSpec_t port) {
-        standard_metadata.egress_spec = port;
-        hdr.ethernet.srcAddr = hdr.ethernet.dstAddr;
-        hdr.ethernet.dstAddr = dstAddr;
-        hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
-    }
-    action multicast(bit<16> grp) {
-        log_msg("set multicast group = {}", {grp});
-        //standard_metadata.mcast_grp = grp;
-    }
-    action mac_forward(macAddr_t srcAddr, egressSpec_t port) {
-        standard_metadata.egress_spec = port;
-        hdr.ethernet.srcAddr = srcAddr;
-    }
-    table ipv4_lpm {
-        key = {
-            hdr.ipv4.dstAddr: lpm;
-        }
-        actions = {
-            ipv4_forward;
-            multicast;
-            drop;
-            NoAction;
-        }
-        size = 1024;
-        default_action = drop();
+    action set_addresses(egressSpec_t port, macAddr_t srcMac, ip4Addr_t srcIp, macAddr_t dstMac, ip4Addr_t dstIp){
+         std_data.egress_spec = port;
+         
+         //enable IPv2 for now to store IP src + dst
+         // it can be disable in MyEgress
+         hdr.ipv4.setValid();
+        
+         hdr.ipv4.srcAddr = srcIp;
+         hdr.ipv4.dstAddr = dstIp;
+        
+         hdr.ethernet.srcAddr = srcMac;
+         hdr.ethernet.dstAddr = dstMac;
     }
     
-    table unicast {
+    table packet_forward {
         key = {
-            hdr.ipv4.srcAddr: lpm;
+            std_data.ingress_port: exact;
         }
         actions = {
-            ipv4_forward;
-            drop;
-            NoAction;
+            set_addresses;
         }
-        size = 1024;
-        default_action = drop();
     }
-    table mac_unicast {
-        key = {
-            standard_metadata.ingress_port: exact;
-        }
-        actions = {
-            mac_forward;
-            drop;
-            NoAction;
-        }
-        size = 1024;
-        default_action = drop();
-    }
-    
 
     apply {
          ptp_counter_init(10); //can store at most 10 sync messages
-         
-         //when we have an IP packet
-         if (hdr.ipv4.isValid() ){
-            if( hdr.ipv4.dstAddr == 0xE0000181 ){ //224.0.1.129
-                unicast.apply();
-            }
-            else ipv4_lpm.apply();
-         }
-         // when we have an Ethernet packet 
-         else if( hdr.ethernet.isValid() ){
-            mac_unicast.apply();
-         }
          
          //PTPv2
          // if we got a PTP packet
@@ -458,7 +413,15 @@ control MyIngress(inout headers hdr,
                //require to capture its departure time
                ptp_capture_egress_mac_tstamp( hdr.ptp.clockId, hdr.ptp.portId, hdr.ptp.sequenceId );
             }
+         } else {
+            // drop packet
+            mark_to_drop(std_data);
+            return;
          }
+
+        // naif routing
+        packet_forward.apply();
+        log_msg("PTP message type {} from port {} to port {}", {hdr.ptp.messageType, std_data.ingress_port, std_data.egress_spec});
     }
 }
 
@@ -486,8 +449,7 @@ control MyEgress(inout headers hdr,
             set_switch_id;
         }
     }
-    
-    
+
     apply {
          //retrieve switchId from outside
          config_switch.apply();
@@ -552,39 +514,53 @@ control MyEgress(inout headers hdr,
                // +4: 4 bytes of header (2bytes of tlvType + 2bytes of fieldLength
                hdr.ptp.messageLength     = hdr.ptp.messageLength + PTP_TLV_INT_LENGTH + 4;
             }
-            
+
             // PTP-over Ethernet
             if( hdr.ethernet.etherType == TYPE_PTP ){
                // => change to PTP over UDP
                // => need to add IPv4/UPD, then put PTP after IPv4/UDP
                //add IPv4
                hdr.ipv4.setValid();
-               hdr.ipv4.dstAddr = 0xE0000181; // 224.0.1.129 in hexadecimal
+               // IP src+dst have been assigned in MyIngress
+               //hdr.ipv4.dstAddr     = 0xE0000181; // 224.0.1.129 in hexadecimal
+               //hdr.ipv4.srcAddr     = 0xC0A8E131; // 192.168.225.49 in hexadecimal
+               hdr.ipv4.version     = 4; //IPv4
+               hdr.ipv4.ihl         = 5; // 5 * 4 = 20 bytes header
+               hdr.ipv4.ttl         = 64; // Typical TTL
+               hdr.ipv4.protocol    = TYPE_UDP;  // TCP (6), UDP = 17
+               hdr.ipv4.hdrChecksum = 0;  // Set to 0 before checksum calc
+               hdr.ipv4.totalLen    = 20 + 8 + hdr.ptp.messageLength; //IP: 20, UDP: 8
 
                //add UDP
                hdr.udp.setValid();
+               hdr.udp.udpTotalLen = 8 + hdr.ptp.messageLength;
                //Sync, Delay_Req, Pdelay_Req, Pdelay_Resp are sent to 319
                if( hdr.ptp.messageType == PTP_MSG_SYNC
                  || hdr.ptp.messageType == PTP_MSG_DELAY_REQUEST )
                   hdr.udp.dstPort = PTP_PORT_319;
                else
                   hdr.udp.dstPort = PTP_PORT_320;
+               //hdr.udp.dstPort = 12345;
+               hdr.udp.srcPort = hdr.udp.dstPort;
 
-               hdr.ipv4.totalLen = 100;
                //indicate that IP is after Ethernet
                hdr.ethernet.etherType = TYPE_IPV4;
             }
             else {
                //PTP-over-UDP
                // => need to remove IPv4, UDP, then put PTP after Ethernet
-               
+
                //remove UDP if it is present
-               hdr.ptp.setInvalid();
+               hdr.udp.setInvalid();
                //remove IPv4 if it is present
                hdr.ipv4.setInvalid();
                //indicate that PTP is after Ethernet
                hdr.ethernet.etherType = TYPE_PTP;
             }
+            
+            //MAC addresses have been configured in Ingress
+            //hdr.ethernet.dstAddr = 0x12244c82add1;//"12:24:4c:82:ad:d1"
+            //hdr.ethernet.srcAddr = 0xee0bac54ee50;// "ee:0b:ac:54:ee:50"
          }
     }
 }

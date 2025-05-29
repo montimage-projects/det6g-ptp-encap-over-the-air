@@ -1,0 +1,16 @@
+[Unit]
+Description = Time translater at Network side
+Wants       = network.target
+After       = network.target
+
+[Service]
+Type             = simple
+WorkingDirectory = /opt/ptp4l/
+ExecStart        = /usr/bin/bash -x ./run-ptp-nw-tt.sh
+Restart          = on-failure
+StandardOutput   = syslog
+StandardError    = syslog
+PIDFile          = /run/ptp4l-nw-tt.pid
+
+[Install]
+WantedBy = multi-user.target
