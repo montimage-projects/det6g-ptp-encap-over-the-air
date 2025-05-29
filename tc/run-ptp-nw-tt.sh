@@ -14,7 +14,8 @@ function get-ip(){
 }
 
 SRC_MAC_1=$(get-mac $PORT_1)
-DST_MAC_1=$(ip neigh show 192.168.225.1 | awk '{print $5}')
+#DST_MAC_1=$(ip neigh show 192.168.225.1 | awk '{print $5}')
+DST_MAC_1=$(get-mac $PORT_1)
 
 SRC_IP_1=$(get-ip $PORT_1)
 DST_IP_1="10.1.1.1"
@@ -40,6 +41,8 @@ function config(){
 	
 	echo $CFG_1 | simple_switch_CLI
 	echo $CFG_2 | simple_switch_CLI
+	# set switch ID
+	echo "table_set_default config_switch set_switch_id 1" | simple_switch_CLI
 }
 
 config &

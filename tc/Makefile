@@ -16,7 +16,7 @@ clean:
 
 
 install: tc.json
-	sudo mkdir /opt/ptp4l/
+	sudo mkdir -p /opt/ptp4l/
 	sudo cp tc.json *.sh /opt/ptp4l
 	sudo cp ptp4l-nw-tt.service /etc/systemd/system/
 	sudo cp ptp4l-ds-tt.service /etc/systemd/system/
