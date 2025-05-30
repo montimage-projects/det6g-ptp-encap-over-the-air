@@ -1,6 +1,6 @@
 #!/bin/bash
 
-PORT_1=lo
+PORT_1=ethX
 PORT_2=enx00e116000000
 
 function get-mac(){
@@ -13,12 +13,17 @@ function get-ip(){
 	ip -4 addr show $iface | grep -oP '(?<=inet\s)\d+(\.\d+){3}'
 }
 
-SRC_MAC_1=$(get-mac $PORT_1)
-#DST_MAC_1=$(ip neigh show 192.168.225.1 | awk '{print $5}')
-DST_MAC_1=$(get-mac $PORT_1)
+#SRC_MAC_1=$(get-mac $PORT_1)
+SRC_MAC_1="46:77:a6:33:c4:93"
+# MAC inside 5G core VM
+#DST_MAC_1="08:00:27:c6:66:c8"
+DST_MAC_1="46:77:a6:33:c4:93"
 
-SRC_IP_1=$(get-ip $PORT_1)
-DST_IP_1="10.1.1.1"
+
+#SRC_IP_1=$(get-ip $PORT_1)
+SRC_IP_1="192.168.100.1"
+DST_IP_1="10.200.0.1"
+
 
 
 

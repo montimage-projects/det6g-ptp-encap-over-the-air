@@ -97,6 +97,14 @@ header ethernet_t {
     bit<16>   etherType;
 }
 
+header icmp_t {
+    bit<8>  type;
+    bit<8>  code;
+    bit<16> checksum;
+    bit<32> restOfHeader;  // Varies: ID/seq for echo, pointer for redirect, etc.
+}
+
+
 header vlan_h {
     bit<3> pcp;
     bit<1> dei;
@@ -209,11 +217,13 @@ struct headers {
     ethernet_t    ethernet;
     vlan_h        vlan;
     ipv4_t        ipv4;
+    icmp_t        icmp;
     tcp_t         tcp;
     udp_t         udp;
     ptp_t         ptp;
     ptp_res_t     ptp_res;
     ptp_tlv_t[MAX_PTP_TLV_BYTES]     ptp_tlv; //existing TLV elements
+    ptp_tlv_int_t logical_ptp_int;  //logical TC for 5G system
     ptp_tlv_int_t ptp_int;
     
     tcp_option_t[MAX_TCP_OPTION_WORD] tcp_opt;
@@ -223,6 +233,7 @@ struct headers {
 struct metadata {
     /* empty */
     bool is_ptp_over_ethernet;
+    bit<16> ptp_tlv_cnt;
 }
 
 
@@ -233,7 +244,7 @@ struct metadata {
 parser MyParser(packet_in packet,
                 out headers hdr,
                 inout metadata meta,
-                inout standard_metadata_t standard_metadata) {
+                inout standard_metadata_t std_data) {
 
     //local variable to count TCP options in number of words
     bit<4> tcp_opt_cnt = 0;
@@ -327,6 +338,7 @@ parser MyParser(packet_in packet,
         //log_msg("parsing PTP Response");
         packet.extract(hdr.ptp_res);
         ptp_tlv_cnt = hdr.ptp.messageLength - PTP_MSG_LEN_DELAY_RESPONSE;
+        meta.ptp_tlv_cnt = ptp_tlv_cnt;
         
         transition select( ptp_tlv_cnt ){
             0      : accept; //no more option
@@ -337,14 +349,15 @@ parser MyParser(packet_in packet,
     state parse_ptp_follow_up {
         //log_msg("parsing PTP follow-up");
         ptp_tlv_cnt = hdr.ptp.messageLength - PTP_MSG_LEN_FOLLOW_UP;
+        meta.ptp_tlv_cnt = ptp_tlv_cnt;
         
         transition select( ptp_tlv_cnt ){
             0      : accept; //no more option
             default: parse_ptp_tlv;
         }
     }
-
     state parse_ptp_tlv {
+        
         packet.extract( hdr.ptp_tlv.next );
         ptp_tlv_cnt = ptp_tlv_cnt - 1;
         transition select( ptp_tlv_cnt ){
@@ -432,8 +445,8 @@ control MyIngress(inout headers hdr,
 control MyEgress(inout headers hdr,
                  inout metadata meta,
                  inout standard_metadata_t std_meta) {
-    bit<64> ingressNs;
-    bit<64> egressNs;
+    bit<64> ingressNs = 0;
+    bit<64> egressNs = 0;
     bit<64> correctionNs;
     
     bit<64> clockId;
@@ -556,6 +569,52 @@ control MyEgress(inout headers hdr,
                hdr.ipv4.setInvalid();
                //indicate that PTP is after Ethernet
                hdr.ethernet.etherType = TYPE_PTP;
+               
+               //add another logical TC for 5G system
+               if( hdr.ptp_tlv[14].isValid()  && egressNs != 0 && ingressNs != 0){
+                    //ptp_int = (ptp_tlv_int_t)( hdr.ptp_tlv );
+                    //if( ptp_int.tlvType == PTP_TLV_INT_TYPE )
+                    if( meta.ptp_tlv_cnt >= PTP_TLV_INT_LENGTH )
+                    {
+                        egressNs = ingressNs;
+                        //Step 2: get ingressTs from INT
+
+                        //TODO: This is a HACK, need to do by extracting TLV
+                        // but no time for now
+                        bit<16> i = meta.ptp_tlv_cnt - 6; //6 byte of correctionNs
+                        //log_msg("previous egressTs index: {}", {i});
+
+                        ingressNs = 
+                            (bit<64>)(hdr.ptp_tlv[i-8].data) << 56 |
+                            (bit<64>)(hdr.ptp_tlv[i-7].data) << 48 |
+                            (bit<64>)(hdr.ptp_tlv[i-6].data) << 40 |
+                            (bit<64>)(hdr.ptp_tlv[i-5].data) << 32 |
+                            (bit<64>)(hdr.ptp_tlv[i-4].data) << 24 |
+                            (bit<64>)(hdr.ptp_tlv[i-3].data) << 16 |
+                            (bit<64>)(hdr.ptp_tlv[i-2].data) << 8  |
+                            (bit<64>)(hdr.ptp_tlv[i-1].data);
+
+                        correctionNs = egressNs - ingressNs;
+                        //log_msg("ptp delay = {}", {correctionNs});
+                        log_msg("previous egressTs: {}", {egressNs});
+     
+                        //Step 3: add inband-network telemetry
+                        //introduce a TLV to contain arrival time and depature time
+                        hdr.logical_ptp_int.setValid();
+                        hdr.logical_ptp_int.tlvType       = PTP_TLV_INT_TYPE;
+                        hdr.logical_ptp_int.fieldLength   = PTP_TLV_INT_LENGTH;  
+                        hdr.logical_ptp_int.switchId      = 9;
+                        hdr.logical_ptp_int.ingressTstamp = ingressNs;
+                        hdr.logical_ptp_int.egressTstamp  = egressNs;
+                        hdr.logical_ptp_int.correctionNs  = hdr.ptp.correctionNs;
+                        
+                        //add delay of its sync message to the correctionField
+                        // (currently we do not support subNano => no need to ajust this field)
+                        hdr.ptp.correctionNs = hdr.ptp.correctionNs + (bit<48>)correctionNs;
+
+                        hdr.ptp.messageLength     = hdr.ptp.messageLength + PTP_TLV_INT_LENGTH + 4;
+                    }
+               }
             }
             
             //MAC addresses have been configured in Ingress
@@ -601,12 +660,14 @@ control MyDeparser(packet_out packet, in headers hdr) {
         packet.emit(hdr.ethernet);
         packet.emit(hdr.vlan);
         packet.emit(hdr.ipv4);
+        packet.emit(hdr.icmp);
         packet.emit(hdr.tcp);
         packet.emit(hdr.tcp_opt);
         packet.emit(hdr.udp);
         packet.emit(hdr.ptp);
         packet.emit(hdr.ptp_res);
         packet.emit(hdr.ptp_tlv);
+        packet.emit(hdr.logical_ptp_int);
         packet.emit(hdr.ptp_int);
     }
 }
