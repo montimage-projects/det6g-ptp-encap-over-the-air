@@ -13,17 +13,13 @@ function get-ip(){
 	ip -4 addr show $iface | grep -oP '(?<=inet\s)\d+(\.\d+){3}'
 }
 
-#SRC_MAC_1=$(get-mac $PORT_1)
-SRC_MAC_1="46:77:a6:33:c4:93"
-# MAC inside 5G core VM
-#DST_MAC_1="08:00:27:c6:66:c8"
-DST_MAC_1="46:77:a6:33:c4:93"
+SRC_MAC_1=$(get-mac $PORT_1) #"46:77:a6:33:c4:93"
+# MAC inside 5G core VM at which UPF is listening on
+DST_MAC_1="08:00:27:c6:66:c8"
 
 
-#SRC_IP_1=$(get-ip $PORT_1)
-SRC_IP_1="10.1.1.1"
-DST_IP_1="10.200.0.1"
-
+SRC_IP_1=$(get-ip $PORT_1) #"192.168.100.1"
+DST_IP_1="10.200.0.1"  #IP of UE
 
 
 

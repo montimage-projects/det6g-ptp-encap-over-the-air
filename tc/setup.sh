@@ -33,3 +33,11 @@ sudo iptables -A FORWARD -i ethX -o wlp0s20f3 -j ACCEPT
 sudo arp -s 10.200.0.1 08:00:27:c6:66:c8
 sudo arp -s 10.200.0.2 08:00:27:c6:66:c8
 sudo arp -s 10.200.0.5 08:00:27:c6:66:c8
+
+
+# optional
+# disable ICMP unreachable port
+# 1: notify only 1 packet
+# 0: completely disable
+sudo sysctl -w net.ipv4.icmp_msgs_per_sec=1
+cat /proc/sys/net/ipv4/icmp_msgs_per_sec

@@ -17,7 +17,7 @@ SRC_MAC_1=$(get-mac $PORT_1)
 DST_MAC_1=$(ip neigh show 192.168.225.1 | awk '{print $5}')
 
 SRC_IP_1=$(get-ip $PORT_1)
-DST_IP_1="10.1.1.1"
+DST_IP_1="192.168.100.1"
 
 
 

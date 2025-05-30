@@ -262,7 +262,11 @@ def analyse_reports(ptp, reports):
             iat -= (report.correctionNs - lreport.correctionNs)
 
         #iat -= ptp.logMessageInterval
-        elem["nodes"][ f"switch-{report.switchId}" ] =  {
+        label = f"TC-{report.switchId}";
+        if report.switchId == 9:
+            label = f"logical TC";
+
+        elem["nodes"][ label ] =  {
                 "iat": iat,
                 "iat-master": iat - iatMaster, 
                 "ingressTstamp": report.ingressTstamp, 
