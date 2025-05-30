@@ -234,6 +234,7 @@ struct metadata {
     /* empty */
     bool is_ptp_over_ethernet;
     bit<16> ptp_tlv_cnt;
+    bit<16> udpLength;
 }
 
 
@@ -318,8 +319,6 @@ parser MyParser(packet_in packet,
         transition select(hdr.udp.dstPort) {
            PTP_PORT_319 : parse_ptp;
            PTP_PORT_320 : parse_ptp;
-           //encapsulated
-           12345 : parse_ptp;
            default      : accept;
         }
     }
@@ -442,6 +441,8 @@ control MyIngress(inout headers hdr,
 ****************  E G R E S S   P R O C E S S I N G   *******************
 *************************************************************************/
 
+register <bit<16>>(1) last_udp_src_port;
+register <bit<16>>(1) last_udp_dst_port;
 control MyEgress(inout headers hdr,
                  inout metadata meta,
                  inout standard_metadata_t std_meta) {
@@ -468,7 +469,7 @@ control MyEgress(inout headers hdr,
          config_switch.apply();
 
          // Prune multicast packet to ingress port to preventing loop
-         if (std_meta.egress_port == std_meta.ingress_port){
+         if (std_meta.egress_port == std_meta.ingress_port || std_meta.egress_port == 0){
             mark_to_drop(std_meta);
             return;
          }
@@ -528,7 +529,11 @@ control MyEgress(inout headers hdr,
                hdr.ptp.messageLength     = hdr.ptp.messageLength + PTP_TLV_INT_LENGTH + 4;
             }
 
-            // PTP-over Ethernet
+
+
+            // encapsulation == decapsulation
+            // 1. PTP-over Ethernet
+            //  ==> need to encapsulate into IP/UDP
             if( hdr.ethernet.etherType == TYPE_PTP ){
                // => change to PTP over UDP
                // => need to add IPv4/UPD, then put PTP after IPv4/UDP
@@ -547,21 +552,38 @@ control MyEgress(inout headers hdr,
                //add UDP
                hdr.udp.setValid();
                hdr.udp.udpTotalLen = 8 + hdr.ptp.messageLength;
+               hdr.udp.checksum = 0;
+               /*
                //Sync, Delay_Req, Pdelay_Req, Pdelay_Resp are sent to 319
                if( hdr.ptp.messageType == PTP_MSG_SYNC
                  || hdr.ptp.messageType == PTP_MSG_DELAY_REQUEST )
                   hdr.udp.dstPort = PTP_PORT_319;
                else
                   hdr.udp.dstPort = PTP_PORT_320;
-               //hdr.udp.dstPort = 12345;
+
                hdr.udp.srcPort = hdr.udp.dstPort;
+               */
+               //TODO: A HACK here: reuse the latest srcPort
+               //  to go back (to bypass UPF)
+               last_udp_src_port.read( hdr.udp.dstPort, 0 );  //invert src-dst
+               last_udp_dst_port.read( hdr.udp.srcPort, 0 );  //invert dst-src
+               if(hdr.udp.dstPort == 0){
+                   hdr.udp.dstPort = 319;
+                   hdr.udp.srcPort = 319;
+               }
+               log_msg("UDP dst Port = {}", {hdr.udp.dstPort});
 
                //indicate that IP is after Ethernet
                hdr.ethernet.etherType = TYPE_IPV4;
             }
             else {
-               //PTP-over-UDP
+               //2. PTP-over-UDP
                // => need to remove IPv4, UDP, then put PTP after Ethernet
+
+               //This is used by the HACK above
+               //remember the last srcPort
+               last_udp_src_port.write( 0, hdr.udp.srcPort);
+               last_udp_dst_port.write( 0, hdr.udp.dstPort);
 
                //remove UDP if it is present
                hdr.udp.setInvalid();
@@ -645,6 +667,26 @@ control MyComputeChecksum(inout headers hdr, inout metadata meta) {
             hdr.ipv4.srcAddr,
             hdr.ipv4.dstAddr },
             hdr.ipv4.hdrChecksum,
+            HashAlgorithm.csum16);
+            
+         update_checksum(
+            hdr.udp.isValid(),
+            { hdr.ipv4.srcAddr,
+            hdr.ipv4.dstAddr,
+            8w0,
+            hdr.ipv4.protocol,
+            hdr.udp.udpTotalLen,
+            hdr.udp.srcPort,
+            hdr.udp.dstPort,
+            hdr.udp.udpTotalLen,
+            16w0, //16 bit zero (checksum placeholder)
+            hdr.ptp,
+            hdr.ptp_res,
+            //hdr.ptp_tlv,
+            //hdr.logical_ptp_int,
+            hdr.ptp_int,
+            },
+            hdr.udp.checksum,
             HashAlgorithm.csum16);
     }
 }
