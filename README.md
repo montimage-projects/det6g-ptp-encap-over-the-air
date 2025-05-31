@@ -9,4 +9,4 @@ The testbed includes 3 transparent clocks:
     - ds-tt: device side time translator
 
 
-<img src="img/testbed.jpg" />
+<img src="img/testbed.png" />
