@@ -92,7 +92,7 @@ def parse_int_reports(rawPayload):
             if report.ingressTstamp >= report.egressTstamp:
                 print(f"IMPOSSIBLE: ingressTs >= egressTs at switchId={report.switchId}")
             reports.append( report )
-
+    print("nb TLV report:", len(reports))
     return reports
 
 # Function to analyze the packet
@@ -138,7 +138,7 @@ def analyze_packet(packet):
 
 # threshold of IAT of each switch
 iatThresholds = dict()
-NB_SAMPLES_TO_LEARN = 20
+NB_SAMPLES_TO_LEARN = 60
 # delta to compare
 DELTA = {"sync" : 100000, "delay_req": 100000}
 def attack_detection( tag, elem ):
@@ -185,6 +185,10 @@ def attack_detection( tag, elem ):
         node = elem["nodes"][s]
         if "iat-master" not in node:
             continue
+        if s not in threshold:
+            continue
+        if tag not in DELTA:
+            continue
         val = node["iat-master"]
         if abs(val) > abs(threshold[s]) + DELTA[tag]:
             node["under-attack"] = 1
@@ -217,8 +221,7 @@ def analyse_reports(ptp, reports):
         print(f"Error: two {tag} messages are not consecutive ({lsequenceId}, {sequenceId})")
         return
     if len(lreports) != len(reports):
-        print(f"Error: two {tag} messages are not same size ({len(lreports)}, {len(reports)})")
-        return
+        print(f"WARNING: two {tag} messages are not same size ({len(lreports)}, {len(reports)})")
 
     #print("-----")
     #print(lreports)
@@ -240,7 +243,14 @@ def analyse_reports(ptp, reports):
     # get delay of each switch
     for i in range(len(reports)):
         report  = reports[i]
-        lreport = lreports[i]
+        
+        # if number of TLV reports changes
+        lreport = report
+        for r in lreports:
+            if r.switchId == report.switchId:
+               lreport = r
+        if lreport == report:
+            print(f"WARNING: use the same report")
 
         # if msg is a delay_res ==> we are analysing its delay_req
         #  delay_res is in drection from slave --> to --> master
@@ -284,7 +294,7 @@ def analyse_reports(ptp, reports):
 number_lock = threading.Lock()
 # Global variables for tracking statistics
 database = {}  # List to store historical bandwidth data points
-MAX_HISTORY_LENGTH = 20  # Maximum number of data points to store
+MAX_HISTORY_LENGTH = 30  # Maximum number of data points to store
 
 def push_stat_to_http_server( tag, elem ):
 

@@ -6,7 +6,7 @@ After       = network.target
 [Service]
 Type             = simple
 WorkingDirectory = /opt/ptp4l/
-ExecStart        = /opt/ptp4l/collector.py --nic enx00e116000000 --sigma 150000000
+ExecStart        = /opt/ptp4l/collector.py --nic enx00e116000000 --sigma 500000000
 Restart          = on-failure
 StandardOutput   = syslog
 StandardError    = syslog

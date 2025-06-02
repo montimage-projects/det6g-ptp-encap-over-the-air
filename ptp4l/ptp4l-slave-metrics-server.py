@@ -12,7 +12,7 @@ line_pattern = re.compile(
 )
 
 # Rolling buffer
-MAX_METRICS = 40
+MAX_METRICS = 300
 metrics_history = deque(maxlen=MAX_METRICS)
 
 def follow_log(log_path):

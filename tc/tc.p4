@@ -454,19 +454,32 @@ control MyEgress(inout headers hdr,
     bit<16> portId;
     bit<16> switchId = 0;
     
+    bit<16> enableLogicalTC = 0;
+    
     // this table is configure by p4_mininet.py
     action set_switch_id( bit<16> sId ){
         switchId = sId;
     }
+    action enable_logical_tc( bit<16> isEnable ){
+        enableLogicalTC = isEnable;
+    }
     table config_switch {
         actions = {
             set_switch_id;
+            enable_logical_tc;
+        }
+    }
+
+    table config_transparent_clock {
+        actions = {
+            enable_logical_tc;
         }
     }
 
     apply {
          //retrieve switchId from outside
          config_switch.apply();
+         config_transparent_clock.apply();
 
          // Prune multicast packet to ingress port to preventing loop
          if (std_meta.egress_port == std_meta.ingress_port || std_meta.egress_port == 0){
@@ -593,7 +606,7 @@ control MyEgress(inout headers hdr,
                hdr.ethernet.etherType = TYPE_PTP;
                
                //add another logical TC for 5G system
-               if( hdr.ptp_tlv[14].isValid()  && egressNs != 0 && ingressNs != 0){
+               if( enableLogicalTC != 0 && hdr.ptp_tlv[14].isValid()  && egressNs != 0 && ingressNs != 0){
                     //ptp_int = (ptp_tlv_int_t)( hdr.ptp_tlv );
                     //if( ptp_int.tlvType == PTP_TLV_INT_TYPE )
                     if( meta.ptp_tlv_cnt >= PTP_TLV_INT_LENGTH )
@@ -616,9 +629,13 @@ control MyEgress(inout headers hdr,
                             (bit<64>)(hdr.ptp_tlv[i-2].data) << 8  |
                             (bit<64>)(hdr.ptp_tlv[i-1].data);
 
+                        if(ingressNs > egressNs){
+                           log_msg("ERROR: ingressNs > egressNs ({} > {})", {ingressNs, egressNs});
+                        }
+
                         correctionNs = egressNs - ingressNs;
                         //log_msg("ptp delay = {}", {correctionNs});
-                        log_msg("previous egressTs: {}", {egressNs});
+                        //log_msg("previous egressTs: {}", {egressNs});
      
                         //Step 3: add inband-network telemetry
                         //introduce a TLV to contain arrival time and depature time
