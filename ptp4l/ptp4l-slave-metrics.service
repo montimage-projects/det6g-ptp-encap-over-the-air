@@ -6,7 +6,7 @@ After       = network.target
 [Service]
 Type             = simple
 WorkingDirectory = /opt/ptp4l/
-ExecStart        = /bin/bash -c 'exec /usr/local/sbin/ptp4l -i eth0 -f slave.cfg > /var/log/ptp4l.log 2>&1'
+ExecStart        = /usr/bin/python3 ptp4l-slave-metrics-server.py --port 8080 --log /var/log/ptp4l.log 
 Restart          = on-failure
 StandardOutput   = syslog
 StandardError    = syslog

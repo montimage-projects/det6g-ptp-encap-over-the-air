@@ -5,9 +5,8 @@ all:
 
 install:
 	sudo mkdir -p /opt/ptp4l/
-	sudo cp master.cfg slave.cfg /opt/ptp4l
-	sudo cp ptp4l-master.service /etc/systemd/system/
-	sudo cp ptp4l-slave.service  /etc/systemd/system/
+	sudo cp * /opt/ptp4l
+	sudo cp *.service  /etc/systemd/system/
 	sudo systemctl daemon-reload
 
 install-linuxptp:

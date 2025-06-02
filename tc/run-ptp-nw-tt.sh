@@ -15,7 +15,8 @@ function get-ip(){
 
 SRC_MAC_1=$(get-mac $PORT_1) #"46:77:a6:33:c4:93"
 # MAC inside 5G core VM at which UPF is listening on
-DST_MAC_1="08:00:27:c6:66:c8"
+#DST_MAC_1="08:00:27:c6:66:c8"
+DST_MAC_1=$(ip neigh show 192.168.100.96 | awk '{print $5}')
 
 
 SRC_IP_1=$(get-ip $PORT_1) #"192.168.100.1"
@@ -24,7 +25,7 @@ DST_IP_1="10.200.0.1"  #IP of UE
 
 
 SRC_MAC_2=$(get-mac $PORT_2)
-DST_MAC_2="01:1b:19:00:00:00"
+DST_MAC_2="01:1b:19:00:00:00" #MAC of eth0 inside the raspberry pi of PTP slave
 
 SRC_IP_2="2.2.2.2" #not important
 DST_IP_2="2.2.2.2"
